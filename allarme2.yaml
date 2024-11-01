@@ -1,0 +1,110 @@
+esphome:
+  name: allarme2
+  friendly_name: allarme2
+  on_boot:
+    priority: 200
+    then:
+      - rtttl.play: 'pacman:d=4,o=5,b=112:32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32c6,32p,32c7,32p,32g6,32p,32e6,32p,32c7,32g6,16p,16e6,16p,32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32d#6,32e6,32f6,32p,32f6,32f#6,32g6,32p,32g6,32g#6,32a6,32p,32b6'
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+wifi:
+  ssid: "D0m0t1c4"
+  password: "mimmoelisabettalucia"
+
+  ap:
+    ssid: "Allarme2 Fallback Hotspot"
+    password: "3OLaNFY9fWMK"
+captive_portal:
+web_server:
+  port: 80
+api:
+ota:
+  - platform: esphome
+output:
+  - platform: ledc
+    pin: GPIO12
+    id: buzzer
+rtttl:
+  output: buzzer
+  id: rtttl_play
+binary_sensor:
+#  - platform: gpio
+#    id: zone_3
+#    name: Zone 3
+#    device_class: motion
+#    pin:
+#      number: GPIOXX
+#      mode: INPUT_PULLUP
+#      inverted: True
+  - platform: gpio
+    pin:
+      number: 18
+      mode: INPUT_PULLDOWN
+    name: "Porta Ingresso"
+    id: portaingresso
+    device_class: door
+  - platform: gpio
+    pin:
+      number: 23
+      mode: INPUT_PULLUP
+    name: "Chiave"
+    id: chiave
+    icon: mdi:key
+    on_state:
+      then:
+        - if:
+            condition:
+              binary_sensor.is_on: chiave
+            then:
+              - alarm_control_panel.arm_away: acp1
+            else:
+              - alarm_control_panel.disarm: acp1
+switch:
+  - platform: gpio
+    id: siren
+    name: Siren
+    icon: mdi:alarm-bell
+    pin: 21
+    on_turn_on: 
+      then:
+        - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'  
+    on_turn_off: 
+      then:
+        - rtttl.stop: 
+
+alarm_control_panel:
+  platform: template
+  name: Alarm Panel
+  id: acp1
+  #codes:
+  #  - "1234"
+  requires_code_to_arm: False
+  arming_away_time: 5s
+  arming_home_time: 5s
+  pending_time: 30s
+  trigger_time: 3min
+  restore_mode: RESTORE_DEFAULT_DISARMED
+  binary_sensors:
+    - input: portaingresso
+      chime: true
+      trigger_mode: instant
+ # bypass_armed_home:
+  on_triggered:
+    then:
+      - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'  
+      - switch.turn_on: siren
+      - delay: 
+          180s
+      - switch.turn_off: siren
+      - delay: 
+          30s
+  on_cleared:
+    then:
+      - switch.turn_off: siren
+      - rtttl.stop:
