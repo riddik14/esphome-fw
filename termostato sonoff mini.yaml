@@ -65,7 +65,7 @@ sensor:
     state_class: "measurement"
     unit_of_measurement: "°C"
   #  topic: sensor/terremoto1/temperature
-    topic: led-airola/sensor/temperatura_/state
+    topic: led-/sensor/temperatura_/state
  #   filters:
  #     - lambda: return x * 1 - 3;
   - platform: mqtt_subscribe
@@ -75,7 +75,7 @@ sensor:
     state_class: "measurement"
     unit_of_measurement: "%"
  #   topic: sensor/terremoto1/temperature
-    topic: led-airola/sensor/umidit_/state
+    topic: led-/sensor/umidit_/state
  #   filters:
  #     - lambda: return x * 1 - 3;
 
