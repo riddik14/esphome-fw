@@ -1,0 +1,408 @@
+substitutions:
+  device_name: vindriktning
+  #board: d1_mini
+  board: esp01_1m
+  platform: ESP8266
+  esp8266_store_log_strings_in_flash: 'true'
+  
+esphome:
+  name: $device_name
+  platform: $platform
+  board: $board
+  board_flash_mode: dout
+
+<<: !include base.txt
+
+button:
+  - platform: safe_mode
+    name: "Restart (Safe Mode)"
+
+wifi:
+  networks:
+  - ssid: ""
+    password: ""
+  ap:
+    ssid: $device_name
+    password: ""
+#  manual_ip:
+#    static_ip: 192.168.1.205
+#    gateway: 192.168.1.1
+#    subnet: 255.255.255.0
+captive_portal:
+web_server:
+  port: 80
+api:
+
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+ota:
+  - platform: esphome
+ #safe_mode: true
+######################
+
+uart:
+  rx_pin: GPIO0
+  baud_rate: 9600
+#Home Assistant Time
+time: #Home Assistant time, other time or Delete (time and below that)
+  - platform: homeassistant
+    id: homeassistant_time
+
+binary_sensor: #If you don't have or want FAN, Delete (binary_sensor and below that)
+  - platform: gpio
+    pin:
+      number: GPIO1
+      inverted: true
+    name: "AQI Ventola"
+    entity_category: "diagnostic"
+  - platform: template
+    name: "Fumo"
+    id: fumo
+    icon: "mdi:cloud"
+    lambda: |-
+      return id(concentrazione_di_particolato_25_um).state > 800;
+    device_class: smoke
+sensor:
+
+  - platform: adc
+    pin: VCC
+    name: "Vcore internal"
+  - platform: pm1006
+    pm_2_5:
+      name: "Concentrazione di particolato 2,5 µm"
+      id: concentrazione_di_particolato_25_um
+  - platform: dht
+    model: DHT11
+    pin: GPIO2
+    temperature:
+      name: "Temperatura vindriktning"
+      filters:
+        - lambda: return x * 1 - 9;
+    humidity:
+      name: "Umidità vindriktning"
+      filters:
+        - lambda: return x * 1 + 43;
+    update_interval: 60s
+  - platform: template
+    name: "PM2.5 Media 24h"
+    id: pm2_5_avg
+    icon: mdi:chemical-weapon
+    unit_of_measurement: µg/m³
+    lambda: |-
+        return id(concentrazione_di_particolato_25_um).state;
+    update_interval: 60s
+    filters:
+        - sliding_window_moving_average:
+            window_size: 1440
+            send_every: 1
+  - platform: template
+    name: "PM2.5 Media"
+    id: pm2_5_media
+    icon: mdi:chemical-weapon
+    unit_of_measurement: µg/m³
+    lambda: |-
+        return id(concentrazione_di_particolato_25_um).state;
+    update_interval: 1s
+    filters:
+        - median:
+            window_size: 30
+            send_every: 30
+            send_first_at: 15
+  - platform: template
+    name: "Livello PM 2.5 US AQI"
+    id: livello_pm25_aqi
+    update_interval: 60s
+    icon: "mdi:blur"
+    unit_of_measurement: "µg/m³"
+    lambda: |-
+      return  (id(concentrazione_di_particolato_25_um).state); 
+    filters:
+      - calibrate_linear:
+          - 0.0 -> 60.0
+          - 100.0 -> 160.0
+          - 200.0 -> 320.0
+          - 300.0 -> 480.0
+  - platform: template
+    name: "Livello PM 2.5 IKEA"
+    id: livello_pm25_ikea
+    icon: "mdi:blur"
+    unit_of_measurement: "µg/m³"
+    update_interval: 60s
+    lambda: |-
+      return  (id(concentrazione_di_particolato_25_um).state) ; 
+    #filters:
+    #  - calibrate_linear:
+    #      - 35.0 -> 12.0
+    #      - 86.0 -> 35.0
+    #      - 500.0 -> 150.0
+#Diagnostic
+  - platform: wifi_signal
+    name: "RSSI"
+    update_interval: 1min
+    unit_of_measurement: "dBm"
+    device_class: "signal_strength"
+    state_class: "measurement"
+    entity_category: "diagnostic"
+
+  - platform: uptime
+    id: uptime_seconds
+    name: "Uptime Seconds"
+    icon: mdi:clock-time-four-outline
+    update_interval: 1min
+    internal: true
+    on_raw_value:
+      then:
+        - text_sensor.template.publish:
+            id: uptime_sensor
+            state: !lambda |-
+              int seconds = round(id(uptime_seconds).raw_state);
+              int days = seconds / (24 * 3600);
+              seconds = seconds % (24 * 3600);
+              int hours = seconds / 3600;
+              seconds = seconds % 3600;
+              int minutes = seconds /  60;
+              seconds = seconds % 60;
+              return (
+                (days ? to_string(days) + "d " : "") +
+                (hours ? to_string(hours) + "h " : "") +
+                (minutes ? to_string(minutes) + "m " : "") +
+                (to_string(seconds) + "s")
+              ).c_str();
+text_sensor:
+  - platform: template
+    name: "Qualità dell'Aria - Città basata sulla concentrazione di PM2.5"
+    icon: "mdi:city"
+    update_interval: 300s
+    lambda: |-
+      auto particolato_value = id(concentrazione_di_particolato_25_um).state;
+      if (particolato_value <= 24.0) {
+        return std::string("Helsinki, Finland");
+      } else if (particolato_value <= 25.0) {
+        return std::string("Bern, Switzerland");
+      } else if (particolato_value <= 29.0) {
+        return std::string("Oslo, Norway");
+      } else if (particolato_value <= 29.0) {
+        return std::string("Kabul, Afghanistan");
+      } else if (particolato_value <= 29.0) {
+        return std::string("Kobe, Japan");
+      } else if (particolato_value <= 29.0) {
+        return std::string("Tokyo, Japan");
+      } else if (particolato_value <= 31.0) {
+        return std::string("Messina, Italia");
+      } else if (particolato_value <= 32.0) {
+        return std::string("Kyoto, Japan");
+      } else if (particolato_value <= 33.0) {
+        return std::string("Osaka, Japan");
+      } else if (particolato_value <= 33.0) {
+        return std::string("Addis Ababa, Ethiopia");
+      } else if (particolato_value <= 35.0) {
+        return std::string("Nice, France");
+      } else if (particolato_value <= 35.0) {
+        return std::string("London, United Kingdom");
+      } else if (particolato_value <= 41.0) {
+        return std::string("Lisbon, Portugal");
+      } else if (particolato_value <= 45.0) {
+        return std::string("Athens, Greece");
+      } else if (particolato_value <= 45.0) {
+        return std::string("Salt Lake City, USA");
+      } else if (particolato_value <= 45.0) {
+        return std::string("London, United Kingdom");
+      } else if (particolato_value <= 46.0) {
+        return std::string("Bishkek, Kyrgyzstan");
+      } else if (particolato_value <= 49.0) {
+        return std::string("Sao Paulo, Brazil");
+      } else if (particolato_value <= 50.0) {
+        return std::string("Baghdad, Iraq");
+      } else if (particolato_value <= 53.0) {
+        return std::string("Pristina, Kosovo");
+      } else if (particolato_value <= 54.0) {
+        return std::string("Incheon, South Korea");
+      } else if (particolato_value <= 55.0) {
+        return std::string("Belgrade, Serbia");
+      } else if (particolato_value <= 55.0) {
+        return std::string("Kaohsiung, Taiwan");
+      } else if (particolato_value <= 55.0) {
+        return std::string("Taipei, Taiwan");
+      } else if (particolato_value <= 56.0) {
+        return std::string("Ho Chi Minh City, Vietnam");
+      } else if (particolato_value <= 57.0) {
+        return std::string("Jakarta, Indonesia");
+      } else if (particolato_value <= 57.0) {
+        return std::string("Kiev, Ukraine");
+      } else if (particolato_value <= 57.0) {
+        return std::string("Kuwait City, Kuwait");
+      } else if (particolato_value <= 58.0) {
+        return std::string("Rome, Italy");
+      } else if (particolato_value <= 60.0) {
+        return std::string("Singapore, Singapore");
+      } else if (particolato_value <= 60.0) {
+        return std::string("Lyon, France");
+      } else if (particolato_value <= 61.0) {
+        return std::string("Seoul, South Korea");
+      } else if (particolato_value <= 61.0) {
+        return std::string("Tashkent, Uzbekistan");
+      } else if (particolato_value <= 62.0) {
+        return std::string("Hong Kong, Hong Kong SAR");
+      } else if (particolato_value <= 62.0) {
+        return std::string("Mexico City, Mexico");
+      } else if (particolato_value <= 63.0) {
+        return std::string("Busan, South Korea");
+      } else if (particolato_value <= 63.0) {
+        return std::string("Shenzhen, China");
+      } else if (particolato_value <= 63.0) {
+        return std::string("Nice, France");
+      } else if (particolato_value <= 65.0) {
+        return std::string("Kuching, Malaysia");
+      } else if (particolato_value <= 65.0) {
+        return std::string("Kampala, Uganda");
+      } else if (particolato_value <= 67.0) {
+        return std::string("Warsaw, Poland");
+      } else if (particolato_value <= 68.0) {
+        return std::string("Bogota, Colombia");
+      } else if (particolato_value <= 68.0) {
+        return std::string("Vienna, Austria");
+      } else if (particolato_value <= 70.0) {
+        return std::string("Shanghai, China");
+      } else if (particolato_value <= 70.0) {
+        return std::string("Doha, Qatar");
+      } else if (particolato_value <= 70.0) {
+        return std::string("Cairo City, Egypt");
+      } else if (particolato_value <= 70.0) {
+        return std::string("Wuhan, China");
+      } else if (particolato_value <= 71.0) {
+        return std::string("Phnom Penh, Cambodia");
+      } else if (particolato_value <= 75.0) {
+        return std::string("Batam, Indonesia");
+      } else if (particolato_value <= 75.0) {
+        return std::string("Sarajevo, Bosnia Herzegovina");
+      } else if (particolato_value <= 76.0) {
+        return std::string("Istanbul, Turkey");
+      } else if (particolato_value <= 77.0) {
+        return std::string("Prague, Czech Republic");
+      } else if (particolato_value <= 77.0) {
+        return std::string("Paris, France");
+      } else if (particolato_value <= 78.0) {
+        return std::string("Ho Chi Minh City, Vietnam");
+      } else if (particolato_value <= 78.0) {
+        return std::string("Chongqing, China");
+      } else if (particolato_value <= 78.0) {
+        return std::string("Jerusalem, Israel");
+      } else if (particolato_value <= 78.0) {
+        return std::string("Algiers, Algeria");
+      } else if (particolato_value <= 84.0) {
+        return std::string("Chiang Mai, Thailand");
+      } else if (particolato_value <= 86.0) {
+        return std::string("Dhaka, Bangladesh");
+      } else if (particolato_value <= 86.0) {
+        return std::string("Moscow, Russia");
+      } else if (particolato_value <= 86.0) {
+        return std::string("Yangon, Myanmar");
+      } else if (particolato_value <= 88.0) {
+        return std::string("Karachi, Pakistan");
+      } else if (particolato_value <= 88.0) {
+        return std::string("Accra, Ghana");
+      } else if (particolato_value <= 90.0) {
+        return std::string("Tel Aviv-Yafo, Israel");
+      } else if (particolato_value <= 91.0) {
+        return std::string("Chongqing, China");
+      } else if (particolato_value <= 92.0) {
+        return std::string("Kuala Lumpur, Malaysia");
+      } else if (particolato_value <= 93.0) {
+        return std::string("Bratislava, Slovakia");
+      } else if (particolato_value <= 97.0) {
+        return std::string("Shanghai, China");
+      } else if (particolato_value <= 99.0) {
+        return std::string("Doha, Qatar");
+      } else if (particolato_value <= 105.0) {
+        return std::string("Bogota, Colombia");
+      } else if (particolato_value <= 110.0) {
+        return std::string("Bangkok, Thailand");
+      } else if (particolato_value <= 112.0) {
+        return std::string("Chengdu, China");
+      } else if (particolato_value <= 118.0) {
+        return std::string("Hanoi, Vietnam");
+      } else if (particolato_value <= 119.0) {
+        return std::string("Zagreb, Croatia");
+      } else if (particolato_value <= 136.0) {
+        return std::string("Wroclaw, Poland");
+      } else if (particolato_value <= 137.0) {
+        return std::string("Kinshasa, Democratic Republic of the Congo");
+      } else if (particolato_value <= 140.0) {
+        return std::string("Hangzhou, China");
+      } else if (particolato_value <= 148.0) {
+        return std::string("Milano, Italy");
+      } else if (particolato_value <= 152.0) {
+        return std::string("Mumbai, India");
+      } else if (particolato_value <= 153.0) {
+        return std::string("Beijing, China");
+      } else if (particolato_value <= 158.0) {
+        return std::string("Krakow, Poland");
+      } else if (particolato_value <= 160.0) {
+        return std::string("Delhi, India");
+      } else if (particolato_value <= 163.0) {
+        return std::string("Dakar, Senegal");
+      } else if (particolato_value <= 172.0) {
+        return std::string("Lahore, Pakistan");
+      } else if (particolato_value <= 173.0) {
+        return std::string("Kathmandu, Nepal");
+      } else {
+        return std::string("Unknown");
+      }
+
+  - platform: template
+    name: "Qualità Aria IKEA"
+    icon: mdi:emoticon
+    update_interval: 30s
+    lambda: |-
+      if (id(concentrazione_di_particolato_25_um).state <= 35.0) {
+        return {"BUONA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 36.0 && id(concentrazione_di_particolato_25_um).state <= 85.0) {
+        return {"OK"};
+      } else {
+        return {"NON BUONA"};
+      }
+  - platform: template
+    name: "Qualità Aria AQI"
+    icon: mdi:emoticon
+    update_interval: 30s
+    lambda: |-
+      if (id(concentrazione_di_particolato_25_um).state <= 12.0) {
+        return {"ECCELLENTE"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 12.0 && id(concentrazione_di_particolato_25_um).state <= 35.0) {
+        return {"BUONA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 35.0 && id(concentrazione_di_particolato_25_um).state <= 55.0) {
+        return {"MODERATA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 55.0 && id(concentrazione_di_particolato_25_um).state <= 150.0) {
+        return {"NON SALUTARE PER ALCUNI"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 150.0 && id(concentrazione_di_particolato_25_um).state <= 250.0) {
+        return {"INSALUBRE"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 250.0 && id(concentrazione_di_particolato_25_um).state <= 350.0) {
+        return {"MOLTO INSALUBRE"};
+      } else {
+        return {"PERICOLOSA"};
+      }
+  - platform: template
+    name: "LED"
+    update_interval: 10s
+    icon: "mdi:led-on"
+    lambda: |-
+      if (id(concentrazione_di_particolato_25_um).state > 86) {
+        return {"ROSSO"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 36) {
+        return {"ARANCIO"};
+      } else {
+        return {"VERDE"};
+      }
+#Diagnostic
+  - platform: template
+    id: uptime_sensor
+    name: "Air Quality Uptime"
+    icon: mdi:clock-time-four-outline
+    entity_category: "diagnostic"
+
+switch:
+  - platform: restart
+    name: "Riavvia Vindriktning"
