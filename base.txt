@@ -4,14 +4,6 @@ wifi:
     password: !secret wifi_password1
   - ssid: !secret ssid2
     password: !secret wifi_password2
-#  - ssid: !secret ssid3
-#    password: !secret wifi_password3
-#  - ssid: "wlan"
-#    password: "mimmoelisabettaluciaantonio"
-#  - ssid: "wlan2"
-#    password: "mimmoelisabettalucia"
-#  - ssid: "D0m0t1c4"
-#    password: "mimmoelisabettalucia"
   ap:
     ssid: "node-mcu"
     password: ""
