@@ -1,47 +1,28 @@
-substitutions:
-  device_name: vindriktning
-  #board: d1_mini
-  board: esp01_1m
-  platform: ESP8266
-  esp8266_store_log_strings_in_flash: 'true'
-  
 esphome:
-  name: $device_name
-  platform: $platform
-  board: $board
-  board_flash_mode: dout
-
-<<: !include base.txt
-
-button:
-  - platform: safe_mode
-    name: "Restart (Safe Mode)"
+  name: vindriktning_d1
+  platform: ESP8266
+  board: d1_mini
 
 wifi:
   networks:
-  - ssid: ""
-    password: ""
+    - ssid: ""
+      password: ""
+  fast_connect: true
   ap:
-    ssid: $device_name
+    ssid: "vindriktning"
     password: ""
-#  manual_ip:
-#    static_ip: 192.168.1.205
-#    gateway: 192.168.1.1
-#    subnet: 255.255.255.0
+
 captive_portal:
+
 web_server:
   port: 80
+
 api:
 
-
 logger:
-  level: DEBUG
-  baud_rate: 0
+  level: INFO
 
 ota:
-  - platform: esphome
- #safe_mode: true
-######################
 
 uart:
   rx_pin: GPIO0
@@ -51,41 +32,42 @@ time: #Home Assistant time, other time or Delete (time and below that)
   - platform: homeassistant
     id: homeassistant_time
 
-binary_sensor: #If you don't have or want FAN, Delete (binary_sensor and below that)
-  - platform: gpio
-    pin:
-      number: GPIO1
-      inverted: true
-    name: "AQI Ventola"
-    entity_category: "diagnostic"
+binary_sensor:
   - platform: template
     name: "Fumo"
     id: fumo
     icon: "mdi:cloud"
     lambda: |-
-      return id(concentrazione_di_particolato_25_um).state > 800;
+      return id(concentrazione_di_particolato_25_um).state > 300;
     device_class: smoke
+i2c:
+  sda: GPIO4
+  scl: GPIO5    
 sensor:
-
-  - platform: adc
-    pin: VCC
-    name: "Vcore internal"
   - platform: pm1006
     pm_2_5:
       name: "Concentrazione di particolato 2,5 µm"
       id: concentrazione_di_particolato_25_um
-  - platform: dht
-    model: DHT11
-    pin: GPIO2
+
+  - platform: sht3xd
     temperature:
-      name: "Temperatura vindriktning"
+      name: "Temperatura"
+      id: temp
       filters:
-        - lambda: return x * 1 - 9;
+        - lambda: return x * 1 - 4.0;
     humidity:
-      name: "Umidità vindriktning"
-      filters:
-        - lambda: return x * 1 + 43;
-    update_interval: 60s
+      name: "Umidità"
+      id: hum
+    address: 0x45
+    update_interval: 600s
+  - platform: template
+    name: "Dew Point"
+    lambda: |-
+      return (243.5*(log(id(hum).state/100)+((17.67*id(temp).state)/
+      (243.5+id(temp).state)))/(17.67-log(id(hum).state/100)-
+      ((17.67*id(temp).state)/(243.5+id(hum).state))));
+    unit_of_measurement: °C
+    icon: 'mdi:thermometer-alert'
   - platform: template
     name: "PM2.5 Media 24h"
     id: pm2_5_avg
@@ -118,13 +100,20 @@ sensor:
     icon: "mdi:blur"
     unit_of_measurement: "µg/m³"
     lambda: |-
-      return  (id(concentrazione_di_particolato_25_um).state); 
-    filters:
-      - calibrate_linear:
-          - 0.0 -> 60.0
-          - 100.0 -> 160.0
-          - 200.0 -> 320.0
-          - 300.0 -> 480.0
+      if (id(concentrazione_di_particolato_25_um).state > 13) {
+        return 42.0;
+      } else if (id(concentrazione_di_particolato_25_um).state > 36) {
+        return 36.0;
+      } else if (id(concentrazione_di_particolato_25_um).state > 56) {
+        return 56.0;
+      } else if (id(concentrazione_di_particolato_25_um).state > 151) {
+        return 151.0;
+      } else if (id(concentrazione_di_particolato_25_um).state > 251) {
+        return 251.0;
+      } else {
+        return 0.0;
+      }
+
   - platform: template
     name: "Livello PM 2.5 IKEA"
     id: livello_pm25_ikea
@@ -132,15 +121,16 @@ sensor:
     unit_of_measurement: "µg/m³"
     update_interval: 60s
     lambda: |-
-      return  (id(concentrazione_di_particolato_25_um).state) ; 
-    #filters:
-    #  - calibrate_linear:
-    #      - 35.0 -> 12.0
-    #      - 86.0 -> 35.0
-    #      - 500.0 -> 150.0
+      if (id(concentrazione_di_particolato_25_um).state > 36) {
+        return 36.0;
+      } else if (id(concentrazione_di_particolato_25_um).state > 86) {
+        return 86.0;
+      } else {
+        return 0.0;
+      }
 #Diagnostic
   - platform: wifi_signal
-    name: "RSSI"
+    name: "Air Quality RSSI"
     update_interval: 1min
     unit_of_measurement: "dBm"
     device_class: "signal_strength"
@@ -175,7 +165,7 @@ text_sensor:
   - platform: template
     name: "Qualità dell'Aria - Città basata sulla concentrazione di PM2.5"
     icon: "mdi:city"
-    update_interval: 300s
+    update_interval: 30s
     lambda: |-
       auto particolato_value = id(concentrazione_di_particolato_25_um).state;
       if (particolato_value <= 24.0) {
@@ -353,36 +343,22 @@ text_sensor:
       }
 
   - platform: template
-    name: "Qualità Aria IKEA"
-    icon: mdi:emoticon
-    update_interval: 30s
+    name: "Qualità Aria"
+    update_interval: 60s
+    icon: "mdi:blur"
     lambda: |-
-      if (id(concentrazione_di_particolato_25_um).state <= 35.0) {
-        return {"BUONA"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 36.0 && id(concentrazione_di_particolato_25_um).state <= 85.0) {
-        return {"OK"};
-      } else {
-        return {"NON BUONA"};
-      }
-  - platform: template
-    name: "Qualità Aria AQI"
-    icon: mdi:emoticon
-    update_interval: 30s
-    lambda: |-
-      if (id(concentrazione_di_particolato_25_um).state <= 12.0) {
-        return {"ECCELLENTE"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 12.0 && id(concentrazione_di_particolato_25_um).state <= 35.0) {
-        return {"BUONA"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 35.0 && id(concentrazione_di_particolato_25_um).state <= 55.0) {
-        return {"MODERATA"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 55.0 && id(concentrazione_di_particolato_25_um).state <= 150.0) {
-        return {"NON SALUTARE PER ALCUNI"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 150.0 && id(concentrazione_di_particolato_25_um).state <= 250.0) {
-        return {"INSALUBRE"};
-      } else if (id(concentrazione_di_particolato_25_um).state > 250.0 && id(concentrazione_di_particolato_25_um).state <= 350.0) {
-        return {"MOLTO INSALUBRE"};
-      } else {
+      if (id(concentrazione_di_particolato_25_um).state > 251) {
         return {"PERICOLOSA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 151) {
+        return {"MOLTO MALSANA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 56) {
+        return {"MALSANA"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 36) {
+        return {"MALSANA PER I SENSIBILI"};
+      } else if (id(concentrazione_di_particolato_25_um).state > 13) {
+        return {"MODERATA"};
+      } else {
+        return {"BUONA"};
       }
   - platform: template
     name: "LED"
@@ -405,4 +381,4 @@ text_sensor:
 
 switch:
   - platform: restart
-    name: "Riavvia Vindriktning"
+    name: "riavvia vindriktning"
