@@ -1,0 +1,650 @@
+esphome:
+  name: alarm
+  name_add_mac_suffix: true
+  #on_boot:
+   # priority: 200
+    #then:
+     # - rtttl.play: 'Whistle:d=8,o=6,b=140:8d' #,g,g,p,g,g,g'
+     # - rtttl.play: 'pacman:d=4,o=5,b=112:32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32c6,32p,32c7,32p,32g6,32p,32e6,32p,32c7,32g6,16p,16e6,16p,32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32d#6,32e6,32f6,32p,32f6,32f#6,32g6,32p,32g6,32g#6,32a6,32p,32b6'
+      #- rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'       
+      #- rtttl.play: 'mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6'
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+wifi:
+  networks:
+  - ssid: "wlan2"
+    password: ""
+  ap:
+    ssid: "Allarme"
+    password: ""
+captive_portal:
+web_server:
+  port: 80
+logger:
+   level: DEBUG
+   #baud_rate: 0
+api:
+ota:
+  - platform: esphome
+output:
+  - platform: ledc
+    pin: GPIO12
+    id: buzzer
+  - platform: gpio
+    pin: GPIO27
+    id: led_verde
+  - platform: gpio
+    pin: GPIO14
+    id: led_rosso
+
+rtttl:
+  output: buzzer
+  id: rtttl_play
+
+sensor:
+  - platform: uptime
+    id: uptime_seconds
+  - platform: wifi_signal
+    name: "WiFi Signal Sensor"
+    update_interval: 20s
+  - platform: template
+    name: "Stato Allarme"
+    id: statoallarme
+    accuracy_decimals: 0
+    #device_class: safety
+    lambda: |-
+      return id(statoallarme_state);
+      
+text_sensor:
+
+  - platform: template
+    name: "Stato Zona Giorno"
+    lambda: |-
+      if (id(finestracucina).state ||
+          id(finestrasalone).state ||
+          id(finestrabagnop).state ||
+          id(portaingresso).state ||
+          id(doppiefinestre).state) {
+        return {"Aperta"};
+      } else {
+        return {"Chiusa"};
+      }
+
+  - platform: template
+    name: "Stato Zona Notte"
+    lambda: |-
+      if (id(finestracamera).state ||
+          id(finestrastudio).state ||
+          id(finestraripostiglio).state ||
+          id(finestracameretta).state ||
+          id(finestrabagnog).state) {
+        return {"Aperta"};
+      } else {
+        return {"Chiusa"};
+      }
+
+  - platform: template
+    name: Uptime
+    icon: mdi:clock-start
+    lambda: |-
+      int seconds = (id(uptime_seconds).state);
+      int days = seconds / (24 * 3600);
+      seconds = seconds % (24 * 3600);
+      int hours = seconds / 3600;
+      seconds = seconds % 3600;
+      int minutes = seconds /  60;
+      seconds = seconds % 60;
+      if ( days ) {
+        return { (String(days) +"d " + String(hours) +"h " + String(minutes) +"m "+ String(seconds) +"s").c_str() };
+      } else if ( hours ) {
+        return { (String(hours) +"h " + String(minutes) +"m "+ String(seconds) +"s").c_str() };
+      } else if ( minutes ) {
+        return { (String(minutes) +"m "+ String(seconds) +"s").c_str() };
+      } else {
+        return { (String(seconds) +"s").c_str() };
+      }
+  - platform: wifi_info
+    ip_address:
+      name: WIFI IP Address
+    ssid:
+      name: WIFI SSID
+    bssid:
+      name: WIFI BSSID
+time:
+  - platform: sntp
+    id: my_time
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: 4
+      mode: INPUT_PULLUP
+    name: "04 Finestra Camera"
+    id: finestracamera
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 5
+      mode: INPUT_PULLUP
+    name: "05 Finestra Bagno Piccolo"
+    id: finestrabagnop
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 15
+      mode: INPUT_PULLUP
+    name: "15 Finestra Cucina"
+    id: finestracucina
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 16
+      mode: INPUT_PULLUP
+    name: "16 Finestra Cameretta"
+    id: finestracameretta
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 17
+      mode: INPUT_PULLUP
+    name: "17 Finestra Bagno Grande"
+    id: finestrabagnog
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 18
+      mode: INPUT_PULLUP
+    name: "18 Porta Ingresso"
+    id: portaingresso
+    device_class: door
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 19
+      mode: INPUT_PULLUP
+    name: "19 Finestra Studio"
+    id: finestrastudio
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 22
+      mode: INPUT_PULLUP
+    name: "22 Finestra Salone"
+    id: finestrasalone
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 23
+      mode: INPUT_PULLUP
+    name: "23 Chiave"
+    id: chiave1
+    icon: mdi:key
+    device_class: plug
+    internal: True
+    on_state:
+      then:
+        - if:
+            condition:
+              binary_sensor.is_on: chiave1
+            then:
+              - alarm_control_panel.arm_away: acp1
+            else:
+              - alarm_control_panel.disarm: acp1
+  - platform: gpio
+    pin:
+      number: 25
+      mode: INPUT_PULLUP
+    name: "25 Finestre Doppie"
+    id: doppiefinestre
+    device_class: window  
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 26
+      mode: INPUT_PULLUP
+    name: "26 Finestra Ripostiglio"
+    id: finestraripostiglio
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 32
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "32 PIR Giorno"
+    id: pirgiorno
+    device_class: motion  
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 35
+      inverted: true
+      #mode: INPUT_PULLUP
+    name: "35 PIR Notte"
+    id: pirnotte
+    device_class: motion
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+  - platform: gpio
+    pin:
+      number: 33
+      mode: INPUT_PULLUP
+    name: "33 Sicurezza Allarme"
+    id: sicurezzaallarme
+    device_class: window
+    on_state:
+      - if:
+          condition:
+            lambda: 'return id(walk_test_switch).state  == true;'
+          then:      
+            - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+            - delay: 100ms
+            - switch.turn_off: siren
+            - rtttl.stop: 
+switch:
+  - platform: template
+    name: "Walking Test"
+    id: walk_test_switch
+    optimistic: True
+  - platform: gpio
+    id: siren
+    name: "21 Sirena"
+    icon: mdi:alarm-bell
+    pin: 21
+  - platform: restart
+    name: "Riavvia allarme"
+
+alarm_control_panel:
+  platform: template
+  name: Alarm Panel
+  id: acp1
+  requires_code_to_arm: False
+  arming_away_time: 10s
+  arming_home_time: 5s
+  pending_time: 30s
+  trigger_time: 30min
+  restore_mode: RESTORE_DEFAULT_DISARMED
+  binary_sensors:
+    - input: finestracucina
+      chime: true
+      trigger_mode: instant
+    - input: finestracamera
+      chime: true
+      trigger_mode: instant
+    - input: finestracameretta
+      chime: true
+      trigger_mode: instant
+    - input: finestrastudio
+      chime: true
+      trigger_mode: instant
+    - input: finestrasalone
+      chime: true
+      trigger_mode: instant
+    - input: finestrabagnog
+      chime: true
+      trigger_mode: instant
+    - input: finestrabagnop
+      chime: true
+      trigger_mode: instant
+    - input: portaingresso
+      chime: true
+      trigger_mode: instant
+    - input: finestraripostiglio
+      chime: true
+      trigger_mode: instant 
+    - input: doppiefinestre
+      chime: true
+      trigger_mode: instant 
+    - input: pirgiorno
+      #chime: true
+      bypass_armed_home: true
+      trigger_mode: instant 
+    - input: pirnotte
+      #chime: true
+      bypass_armed_home: true
+      trigger_mode: instant 
+  on_disarmed: 
+    then:
+      - globals.set:
+          id: statoallarme_state
+          value: '4'
+          #siren 1000hz
+          
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 100ms
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 100ms
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 100ms
+      - switch.turn_off: siren
+      - rtttl.stop: 
+  on_arming:
+    then:
+      - globals.set:
+          id: statoallarme_state
+          value: '3'
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'   
+      - delay: 1000ms
+      - rtttl.stop: 
+  on_triggered:
+    then:
+      - globals.set:
+          id: statoallarme_state
+          value: '1'
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 180s
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - delay: 30s
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 180s
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - delay: 30s
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 180s
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - delay: 30s
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b'  
+      - delay: 180s
+      - switch.turn_off: siren
+      - rtttl.stop: 
+      - delay: 30s
+  on_armed_away: 
+    then:
+      - globals.set:
+                id: led_state_arm
+                value: 'true'
+      - globals.set:
+          id: statoallarme_state
+          value: '2'
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b' 
+      - delay: 300ms
+      - rtttl.stop: 
+      - switch.turn_off: siren
+  on_cleared:
+    then:
+      - globals.set:
+          id: statoallarme_state
+          value: '0'
+      - switch.turn_on: siren
+      - rtttl.play: 'siren:d=4,o=6,b=100:b' 
+      - delay: 800ms
+      - rtttl.stop: 
+      - switch.turn_off: siren
+
+globals:
+  - id: led_state_arm
+    type: bool
+    initial_value: 'false'
+  - id: led_state
+    type: bool
+    initial_value: 'false'
+  - id: sirena_state
+    type: bool
+    initial_value: 'false'
+  - id: statoallarme_state
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+script:
+  - id: blink_leds_sfast
+    mode: restart
+    then:
+      - output.turn_on: led_verde
+      - output.turn_on: led_rosso
+      - delay: 150ms
+      - output.turn_off: led_verde
+      - output.turn_off: led_rosso
+      - delay: 150ms
+      - script.execute: blink_leds_sfast  # Loop the script
+  - id: blink_leds_fast
+    mode: restart
+    then:
+      - output.turn_on: led_verde
+      - output.turn_on: led_rosso
+      - delay: 300ms
+      - output.turn_off: led_verde
+      - output.turn_off: led_rosso
+      - delay: 300ms
+      - script.execute: blink_leds_fast  # Loop the script
+
+  - id: blink_leds_slow
+    mode: restart
+    then:
+      - output.turn_on: led_verde
+      - output.turn_on: led_rosso
+      - delay: 1000ms
+      - output.turn_off: led_verde
+      - output.turn_off: led_rosso
+      - delay: 700ms
+      - script.execute: blink_leds_slow  # Loop the script
+
+  - id: led_verde_pulse
+    mode: single
+    then:
+      - output.turn_on: led_verde
+      - delay: 200ms
+      - output.turn_off: led_verde
+      - delay: 100ms
+      - script.execute: led_verde_pulse  # Loop the script
+  - id: led_verde_pulse_slow
+    mode: single
+    then:
+      - output.turn_on: led_verde
+      - delay: 500ms
+      - output.turn_off: led_verde
+      - delay: 100ms
+      - script.execute: led_verde_pulse_slow  # Loop the script
+
+  - id: led_rosso_pulse_slow
+    mode: single
+    then:
+      - output.turn_on: led_rosso
+      - delay: 500ms
+      - output.turn_off: led_rosso
+      - delay: 100ms
+      - script.execute: led_rosso_pulse_slow  # Loop the script
+  - id: led_rosso_pulse
+    mode: single
+    then:
+      - output.turn_on: led_rosso
+      - delay: 200ms
+      - output.turn_off: led_rosso
+      - delay: 100ms
+      - script.execute: led_rosso_pulse  # Loop the script
+
+interval:
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            lambda: 'return id(statoallarme_state) == 2;'  # Armato
+          then:
+            - script.execute: blink_leds_fast
+            - globals.set:
+                id: led_state_arm
+                value: 'true'
+          else:
+            - script.stop: blink_leds_fast
+      - if:
+          condition:
+            lambda: 'return id(statoallarme_state) == 3;'  # Arming
+          then:
+            - script.execute: blink_leds_slow
+            - globals.set:
+                id: led_state_arm
+                value: 'true'
+          else:
+            - script.stop: blink_leds_slow
+
+      - if:
+          condition:
+            lambda: 'return id(statoallarme_state) == 1;'  # Triggered
+          then:
+            - script.execute: blink_leds_sfast
+            - globals.set:
+                id: led_state_arm
+                value: 'false'
+          else:
+            - script.stop: blink_leds_sfast
+
+      - if:
+          condition:
+            or:
+              - lambda: 'return id(statoallarme_state) == 0;'  # Disarmato
+              - lambda: 'return id(statoallarme_state) == 4;'  # Cleared
+          then:
+            - if:
+                condition:
+                  or:
+                    - binary_sensor.is_on: finestracucina
+                    - binary_sensor.is_on: finestrasalone
+                    - binary_sensor.is_on: finestrabagnop
+                    - binary_sensor.is_on: portaingresso
+                    - binary_sensor.is_on: doppiefinestre
+
+                then:
+                  - script.execute: led_verde_pulse_slow
+                  - globals.set:
+                      id: led_state
+                      value: 'true'
+                else:
+                  - script.stop: led_verde_pulse_slow
+                  - output.turn_off: led_verde
+
+            - if:
+                condition:
+                  or:
+                    - binary_sensor.is_on: finestracamera
+                    - binary_sensor.is_on: finestrabagnog
+                    - binary_sensor.is_on: finestrastudio
+                    - binary_sensor.is_on: finestracameretta
+                    - binary_sensor.is_on: finestraripostiglio
+                then:
+                  - script.execute: led_rosso_pulse_slow
+                  - globals.set:
+                      id: led_state
+                      value: 'true'
+                else:
+                  - script.stop: led_rosso_pulse_slow
+                  - output.turn_off: led_rosso
