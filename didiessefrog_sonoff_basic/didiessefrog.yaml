@@ -1,6 +1,5 @@
 substitutions:
   device_name: didiessefrog
-  #board: d1_mini
   board: esp01_1m
   platform: ESP8266
   esp8266_store_log_strings_in_flash: 'false'
@@ -19,25 +18,11 @@ button:
 
 wifi:
   networks:
-  - ssid: !secret ssid2
+  - ssid: !secret ssid
     password: !secret wifi_password1
- # - ssid: !secret ssid1
- #   password: !secret wifi_password2
-#  - ssid: !secret ssid3
-#    password: !secret wifi_password3
-#  - ssid: "wlan"
-#    password: "mimmoelisabettaluciaantonio"
-#  - ssid: "wlan2"
-#    password: "mimmoelisabettalucia"
-#  - ssid: "D0m0t1c4"
-#    password: "mimmoelisabettalucia"
   ap:
     ssid: "didiessefrog"
     password: ""
-#  manual_ip:
-#    static_ip: 192.168.1.205
-#    gateway: 192.168.1.1
-#    subnet: 255.255.255.0
 captive_portal:
 web_server:
   port: 80
@@ -47,16 +32,9 @@ api:
 
 ota:
   - platform: esphome
- #safe_mode: true
 logger:
   level: DEBUG
   baud_rate: 0
-
-#external_components:
-#  - source: github://pr#3331
-#    components: ["json"]
-######################
-######################
 sensor:
   - platform: template
     name: "Serbatoio"
@@ -82,7 +60,6 @@ sensor:
     name: "Peso Totale"
     dout_pin: GPIO1
     clk_pin: GPIO3
-    #gain: 128
     update_interval: 5s
     id: peso
     accuracy_decimals: 2
@@ -92,13 +69,7 @@ sensor:
           - -129027 -> 0.0
           - 234506 -> 0.943
           - 383268 -> 1.3290
-          #- 267130 -> 1
-         # - 393000 -> 1
 
-#  - platform: max6675
-#    name: "Temperatura Caldaia Caffè"
-#    cs_pin: GPIO14
-#    update_interval: 10s
 binary_sensor:
   - platform: gpio
     internal: true
@@ -112,17 +83,11 @@ binary_sensor:
       max_length: 350ms
       then:
         - switch.toggle: relay
- # - platform: status
-#    name: "stato $device_name"
 switch:
   - platform: gpio
     name: $device_name
     pin: GPIO12
     id: relay
- # - platform: gpio
-  #  name: led
-  #  pin: GPIO13
-  #  id: led
   - platform: restart
     name: "riavvia $device_name"
 light:
@@ -136,8 +101,3 @@ light:
  # pin:
   #  number: GPIO13
    # inverted: true
-
-#spi:
-#  miso_pin: GPIO01
-#  clk_pin: GPIO03
-
