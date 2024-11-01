@@ -1,0 +1,962 @@
+substitutions:
+  device_name: misuratore-consumi
+  board: d1_mini
+  platform: ESP8266
+  esp8266_store_log_strings_in_flash: 'true'
+
+esphome:
+  name: $device_name
+  platform: $platform
+  board: $board
+  board_flash_mode: dout
+  on_boot:
+    priority: 200
+    then:
+      - rtttl.play: 'Whistle:d=8,o=6,b=140:8d' #,g,g,p,g,g,g'
+      #- rtttl.play: 'pacman:d=4,o=5,b=112:32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32c6,32p,32c7,32p,32g6,32p,32e6,32p,32c7,32g6,16p,16e6,16p,32b,32p,32b6,32p,32f#6,32p,32d#6,32p,32b6,32f#6,16p,16d#6,16p,32d#6,32e6,32f6,32p,32f6,32f#6,32g6,32p,32g6,32g#6,32a6,32p,32b6'
+      #- rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'       
+      #- rtttl.play: 'mario:d=4,o=5,b=100:16e6,16e6,32p,8e6,16c6,8e6,8g6,8p,8g,8p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,16p,8c6,16p,8g,16p,8e,16p,8a,8b,16a#,8a,16g.,16e6,16g6,8a6,16f6,8g6,8e6,16c6,16d6,8b,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16c7,16p,16c7,16c7,p,16g6,16f#6,16f6,16d#6,16p,16e6,16p,16g#,16a,16c6,16p,16a,16c6,16d6,8p,16d#6,8p,16d6,8p,16c6'
+
+<<: !include base.txt
+
+button:
+  - platform: safe_mode
+    name: "Restart (Safe Mode)"
+
+wifi:
+  networks:
+    - ssid: !secret ssid1
+      password: !secret wifi_password1
+    - ssid: !secret ssid2
+      password: !secret wifi_password2
+  ap:
+    ssid: $device_name
+    password: ""
+
+captive_portal:
+web_server:
+  port: 80
+api:
+logger:
+  level: INFO
+  baud_rate: 0
+ota:
+  - platform: esphome
+  # safe_mode: true
+
+switch:
+  - platform: restart
+    name: "riavvia $device_name"
+
+  - platform: template
+    id: rearm_switch
+    name: "Riarmo"
+    turn_on_action:
+      - lambda: |-
+          if (id(rearm_attempts) < id(rearm_attempts_limit)) {
+            id(rearm_timer_started) = true;
+            id(rearm_time_remaining) = 60; // Imposta il tempo di riarmo
+            id(rearm_attempts) += 1;
+          } else {
+            // Logica per indicare che il riarmo è bloccato
+          }
+output:
+  - platform: esp8266_pwm
+    pin: D8
+    id: rtttl_out
+  - platform: gpio
+    pin: D4
+    id: display_output
+  - platform: esp8266_pwm
+    pin: D7
+    id: servo_pin
+uart:
+  rx_pin: RX
+  tx_pin: TX
+  baud_rate: 9600
+rtttl:
+  output: rtttl_out
+  id: rtttl_play
+
+i2c:
+  sda: D2
+  scl: D1
+  #scan: true
+
+#globals:
+#  - id: countdown_started
+#    type: bool
+#    restore_value: "false"
+#    initial_value: "false"
+#  - id: countdown_time_remaining
+#    type: int
+#    restore_value: "false"
+#    initial_value: "0"
+display:
+  - platform: lcd_pcf8574
+    dimensions: 20x4
+    address: 0x3F #63
+    id: mydisplay
+    update_interval: 1s
+    lambda: |-
+
+      float power_state = id(power).state;
+      float ampere = id(cur).state;
+      float voltaggio = id(vol).state;
+      float fattoreenergia = id(pow_factor).state;
+      float frequenza1 = id(freq).state;
+      int countdown_timer_state_180 = static_cast<int>(id(countdown_timer_180).state);
+      int countdown_timer_state_3 = static_cast<int>(id(countdown_timer_3).state);
+      static bool show = false;
+      bool arming_blocked = id(rearm_blocked);
+
+      unsigned long current_time = millis();
+
+      if (arming_blocked) {
+        it.clear();
+        it.print(0, 0, "RIARMO BLOCCATO");
+        it.print(0, 1, "Verifica il sistema");
+        it.print(0, 2, "o contatta assistenza");
+      } else if (power_state > 3300) {
+        it.clear();
+        it.printf(0, 0, "DISTACCO TRA %02d:%02d", countdown_timer_state_180 / 60, countdown_timer_state_180 % 60);
+        it.print(0, 1, "RIDUCI IL CARICO");
+        it.print(0, 2, "HAI SUPERATO +30%");
+        it.printf(0, 3, "SEI A %.1f W", power_state);
+      } else if (power_state > 4000) {
+        it.clear();
+        it.printf(0, 0, "DISTACCO TRA %02d:%02d", countdown_timer_state_3 / 60, countdown_timer_state_3 % 60);
+        it.print(0, 1, "RIDUCI IL CARICO");
+        it.print(0, 2, "RISCHIO DISTACCO!");
+        it.printf(0, 3, "SEI A %.1f W", power_state);
+
+      } else if (!id(api_connected).state){
+        it.print(0, 0, "DOMOTICA  CECCARELLI");
+        it.strftime(0, 1, "%d/%m/%Y", id(homeassistant_time).now());
+        it.strftime(12, 1, "%H:%M:%S", id(homeassistant_time).now());
+
+         if (id(wifi_status).state) {
+          it.print(0, 3, "  Wi-Fi   Connesso  ");
+        } else {
+          it.print(0, 3, " Wi-Fi  Disconnesso ");
+        }
+        if (id(api_connected).state) {
+          it.print(0, 2, "  Hassio  Connesso  ");
+        } else {
+          it.print(0, 2, " Hassio Disconnesso ");
+        }  
+      
+      } else if (id(allarme_stato).state == "armed_away") {
+        it.clear();
+        it.printf(0, 0, "%.1f V", id(vol).state);
+        it.printf(13, 0, "%.1f W", power_state);
+        it.print(0, 1, "   ALLARME ATTIVO.  ");
+        it.print(0, 2, "     FUORI CASA     ");
+        it.print(0, 3, id(current_fascia_text).state);
+        it.printf(3, 3, "%.1f Hz", id(freq).state);
+        it.printf(15, 3, "%.1f A", id(cur).state);
+
+      } else if (show || id(allarme_stato).state == "armed_home") {
+        it.clear();
+        it.printf(0, 0, "%.1f V", id(vol).state);
+        it.printf(13, 0, "%.1f W", power_state);
+        it.print(0, 1, "   ALLARME ATTIVO   ");
+        it.print(0, 2, "      IN  CASA      ");
+        it.print(0, 3, id(current_fascia_text).state);
+        it.printf(3, 3, "%.1f Hz", id(freq).state);
+        it.printf(15, 3, "%.1f A", id(cur).state);
+        show = !show;
+      } else if (id(allarme_stato).state == "triggered") {
+        it.clear();
+        it.printf(0, 0, "%.1f V", id(vol).state);
+        it.printf(13, 0, "%.1f W", power_state);
+        it.print(0, 1, "       ALLARME      ");
+        it.print(0, 2, "      INNESCATO     ");
+        it.print(0, 3, id(current_fascia_text).state);
+        it.printf(3, 3, "%.1f Hz", id(freq).state);
+        it.printf(15, 3, "%.1f A", id(cur).state);
+
+      } else {
+        int page = atoi(id(screen_index).state.c_str());
+        it.clear();
+        if (page == 0) {                                                      //pagina 0
+        it.print(0, 0, "DOMOTICA  CECCARELLI");
+        it.strftime(0, 1, "%d/%m/%Y", id(homeassistant_time).now());
+        it.strftime(12, 1, "%H:%M:%S", id(homeassistant_time).now());
+        
+         if (id(wifi_status).state) {
+          it.print(0, 3, "  Wi-Fi   Connesso  ");
+        } else {
+          it.print(0, 3, " Wi-Fi  Disconnesso ");
+        }
+        if (id(api_connected).state) {
+          it.print(0, 2, "  Hassio  Connesso  ");
+        } else {
+          it.print(0, 2, " Hassio Disconnesso ");
+        }  
+      
+      } else if (page == 1) {                                                        //pagina 1
+          it.print(0, 0, "Istantaneo");
+          it.printf(0, 1, "%.1f V", voltaggio);        it.print(10, 1, "|");   it.printf(12, 1, "%.1f Hz", frequenza1);               // 220.5 V  |  50.0 Hz// 
+          it.printf(0, 2, "%.1f W", power_state);      it.print(10, 2, "|");   it.printf(13, 2, "%.1f Pf", fattoreenergia);           //3000.1 W  |  1.00 Pf//
+          it.printf(0, 3, "%.1f A", ampere);           it.print(10, 3, "|");   //it.print(17, 3, id(current_fascia_text).state);           //3000.1 W  |       F1//                                       
+        } else if (page == 2) {                                                      //pagina 2
+          it.print(0, 0, "Consumi Fasce");
+          it.printf(2, 1, "F1: %.5f kW/h", id(energy_f1_d).state);
+          it.printf(2, 2, "F2: %.5f kW/h", id(energy_f2_d).state);
+          it.printf(2, 3, "F3: %.5f kW/h", id(energy_f3_d).state);
+        } else if (page == 3) {                                                      //pagina 3
+          it.print(0, 0, "Costi Fasce");
+          it.printf(3, 1, "F1: %.2f e/kWh", id(costo_energia_f1).state);
+          it.printf(3, 2, "F2: %.2f e/kWh", id(costo_energia_f2).state);
+          it.printf(3, 3, "F3: %.2f e/kWh", id(costo_energia_f3).state);
+        } else if (page == 4) {                                                      //pagina 4
+          it.clear();
+          it.print(0, 1, "  FASCIA  CORRENTE  ");
+          it.print(9, 2, id(current_fascia_text).state);
+          it.print(3, 3, id(current_fascia_prezzo).state);
+          it.print(12, 3, "e/kWh");
+        } else if (page == 5) {                                                      //pagina 5
+          it.clear();
+          it.print(0, 1, " OGGI HAI CONSUMATO ");
+          it.printf(0, 2, "     %.3f kW/h     ", id(consumo_somma).state);
+          it.printf(0, 3, "     %.3f EURO     ", id(costo_energia_totale).state);
+        } else if (page == 6) {                                                      //pagina 6
+          it.clear();
+          it.print(0, 1, "  BOLLETTA ATTUALE  ");
+          it.printf(6, 2, "%.2f EURO", id(costo_energia_mensile).state);
+        } else if (page == 7) {                                                      //pagina 7
+          it.clear();
+          it.print(0, 1, "   CONSUMO TOTALE   ");
+          it.print(0, 2, "   DA ULTIMO RESET  ");
+          it.printf(6, 3, "%.1f MW/h", id(total_energy).state / 1000000);
+        }
+      }
+
+binary_sensor:
+  - platform: status  #  name: "WiFi Status"
+    id: wifi_status
+    internal: True
+  - platform: template
+    id: display_toggle
+    internal: true
+  - platform: template   # name: "API Home Assistant Connected"
+    id: api_connected
+    lambda: |-
+      if (esphome::api::global_api_server->is_connected()) {
+        return true;
+      } else {
+        return false;
+      }
+    device_class: connectivity
+    internal: True
+  - platform: template
+    id: rearm_status
+    name: "Rearm Status"
+    lambda: |-
+      if (id(rearm_timer_started)) {
+        return id(rearm_time_remaining) > 0;
+      }
+      return false;
+light:
+  - platform: binary
+    id: display_light
+    output: display_output
+sensor:
+  - platform: pzemac
+    current:
+      name: "Ampere"
+      id: cur
+    voltage:
+      name: "Volt"
+      id: vol
+    energy:
+      name: "Consumo"
+      id: total_energy
+    power:
+      name: "Watt"
+      id: power
+    frequency:
+      name: "Frequenza"
+      id: freq
+    power_factor:
+      name: "Fattore energia"
+      id: pow_factor
+    update_interval: 10s
+
+  - platform: template
+    id: rearm_timer
+    name: "Rearm Timer"
+    lambda: |-
+      if (id(rearm_timer_started)) {
+        id(rearm_time_remaining) = max(id(rearm_time_remaining) - 1, 0);
+        if (id(rearm_time_remaining) == 0) {
+          id(rearm_timer_started) = false;
+          id(rearm_switch).turn_on();
+          id(last_rearm_time) = millis(); // Memorizza il momento del riarmo
+        }
+      }
+      return id(rearm_time_remaining);
+    update_interval: 1s
+ # - platform: template
+ #   name: "Angolo di fase"
+ #   id: phase_angle
+ #   unit_of_measurement: "°"
+ #   state_class: measurement
+ #   accuracy_decimals: 1
+ #   device_class: power
+ #   lambda: |-
+ #     return (acos(id(pow_factor).state) * 180.0) / (3.14159265359);  // Converte il fattore di potenza in gradi
+
+ # - platform: template
+ #   name: "Potenza apparente"
+ #   id: apparent_power
+ #   unit_of_measurement: "VA"
+ #   state_class: measurement
+ #   accuracy_decimals: 1
+ #   device_class: power
+ #   lambda: |-
+ #     return id(vol).state * id(cur).state;
+
+  #- platform: template
+  #  name: "Potenza reattiva"
+  #  id: reactive_power
+  #  unit_of_measurement: "VAR"
+  #  state_class: measurement
+  #  accuracy_decimals: 1
+  #  device_class: power
+  #  lambda: |-
+  #    return sqrt((id(apparent_power).state * id(apparent_power).state) - (id(power).state * id(power).state));
+
+  #- platform: template
+  #  name: "Potenza attiva"
+  #  id: active_power
+  #  unit_of_measurement: "W"
+  #  state_class: measurement
+  #  accuracy_decimals: 1
+  #  device_class: power
+  #  lambda: |-
+  #    return id(power).state;
+
+  #- platform: template
+  #  name: "Energia reattiva"
+  #  id: reactive_energy
+  #  unit_of_measurement: "VARh"
+  #  state_class: total_increasing
+  #  accuracy_decimals: 1
+  #  device_class: energy
+  #  filters:
+  #    - delta:
+  #        value: 0.0
+  #  lambda: |-
+  #    return sqrt((id(apparent_power).state * id(apparent_power).state) - (id(power).state * id(power).state));
+  
+
+  #- platform: template
+  #  name: "Fattore di potenza"
+  #  id: power_factor
+  #  unit_of_measurement: ""
+  #  state_class: measurement
+  #  accuracy_decimals: 2
+  #  device_class: power_factor
+  #  lambda: |-
+  #    return id(pow_factor).state;
+
+  #- platform: total_daily_energy
+  #  name: "Consumo giornaliero"
+  #  id: total_daily_energy
+  #  power_id: power_dayl
+  #  filters:
+  #    - multiply: 0.001
+  #  accuracy_decimals: 2
+  #  unit_of_measurement: kWh
+
+  #- platform: total_daily_energy
+  #  name: "Consumo giornaliero (apparente)"
+  #  id: total_daily_apparent_energy
+  #  power_id: apparent_power
+  #  filters:
+  #    - multiply: 0.001
+  #  accuracy_decimals: 2
+  #  unit_of_measurement: kVAh
+
+ # - platform: template
+ #   name: "Armoniche (1st)"
+ #   id: harmonics_1st
+ #   unit_of_measurement: "Hz"
+ #   icon: "mdi:wave"
+ #   accuracy_decimals: 2
+ #   lambda: |-
+ #     // Calcolo approssimato delle prime armoniche utilizzando la frequenza di rete (50/60 Hz)
+ #     return 50.0; // o 60.0 se la frequenza della tua rete è di 60 Hz
+
+
+  - platform: total_daily_energy
+    name: "Totale Giornaliero"
+    power_id: power
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 3
+    restore: true
+    id: consumo_somma
+    filters:
+      - multiply: 0.001
+  - platform: total_daily_energy
+    name: "Energia F1"
+    power_id: energy_f1
+    id: energy_f1_d
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 5
+    restore: true
+    filters:
+      - multiply: 0.001
+  - platform: total_daily_energy
+    name: "Energia F2"
+    power_id: energy_f2
+    id: energy_f2_d
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 5
+    restore: true
+    filters:
+      - multiply: 0.001
+  - platform: total_daily_energy
+    name: "Energia F3"
+    power_id: energy_f3
+    id: energy_f3_d
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 5
+    restore: true
+    filters:
+      - multiply: 0.001
+  - platform: template
+  #  name: "Energia F1 template"
+    id: energy_f1
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 3
+    internal: True
+  - platform: template
+  #  name: "Energia F2 template"
+    id: energy_f2
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 3
+    internal: True
+  - platform: template
+  #  name: "Energia F3 template"
+    id: energy_f3
+    unit_of_measurement: 'kWh'
+    state_class: total_increasing
+    device_class: energy
+    accuracy_decimals: 3
+    internal: True
+  - platform: template
+    name: "Costo Materia Energia F1"
+    id: costo_energia_f1
+    unit_of_measurement: '€'
+    accuracy_decimals: 2
+    lambda: |-
+      return id(energy_f1_d).state * id(prezzo_f1).state ;
+  - platform: template
+    name: "Costo Materia Energia F2"
+    id: costo_energia_f2
+    unit_of_measurement: '€'
+    accuracy_decimals: 2
+    lambda: |-
+      return id(energy_f2_d).state * id(prezzo_f2).state ;
+  - platform: template
+    name: "Costo Materia Energia F3"
+    id: costo_energia_f3
+    unit_of_measurement: '€'
+    accuracy_decimals: 2
+    lambda: |-
+      return id(energy_f3_d).state * id(prezzo_f3).state ;
+  - platform: template
+    name: "Costo Energia Giornaliero"
+    id: costo_energia_totale
+    unit_of_measurement: '€'
+    accuracy_decimals: 2
+    lambda: |-
+      return (  (id(energy_f1_d).state * id(prezzo_f1).state) + (id(energy_f2_d).state * id(prezzo_f2).state) + (id(energy_f3_d).state * id(prezzo_f3).state)  );
+  - platform: homeassistant
+    name: "Prezzo fascia F1"
+    entity_id: sensor.pun_fascia_f1
+    id: prezzo_f1
+    accuracy_decimals: 3
+  - platform: homeassistant
+    name: "Prezzo fascia F2"
+    entity_id: sensor.pun_fascia_f2
+    id: prezzo_f2
+    accuracy_decimals: 3
+  - platform: homeassistant
+    name: "Prezzo fascia F3"
+    entity_id: sensor.pun_fascia_f3
+    id: prezzo_f3
+    accuracy_decimals: 3
+  - platform: template
+   # name: "Countdown Timer 180 Minutes"
+    id: countdown_timer_180
+    internal: True
+    update_interval: 1s
+    lambda: |-
+      static unsigned long end_time = 0;
+      static bool countdown_started = false;
+      // Se il valore di power supera 3300w e il countdown non è ancora iniziato, avvia il countdown
+      if (id(power).state > 3300 && !countdown_started) {
+        end_time = millis() + (180 * 60 * 1000); // 180 minuti
+        countdown_started = true;
+      }
+      // Se il countdown è iniziato
+      if (countdown_started) {
+        // Calcola il tempo rimanente
+        unsigned long remaining_time = end_time > millis() ? (end_time - millis()) / 1000 : 0;
+        // Se il tempo rimanente è zero, reimposta lo stato
+        if (remaining_time == 0) {
+          countdown_started = false;
+        }
+        // Se il valore di power scende sotto 3300, reimposta il countdown
+        if (id(power).state < 3300) {
+          countdown_started = false;
+        }
+        return remaining_time;
+      } else {
+        // Se il countdown non è iniziato, restituisci 0
+        return 0;
+      }
+  - platform: template
+   # name: "Countdown Timer 3 Minutes"
+    id: countdown_timer_3
+    internal: True
+    update_interval: 1s
+    lambda: |-
+      static unsigned long end_time = 0;
+      static bool countdown_started = false;
+      // Se il valore di power supera 4000w e il countdown non è ancora iniziato, avvia il countdown
+      if (id(power).state > 4000 && !countdown_started) {
+        end_time = millis() + (3 * 60 * 1000); // 3 minuti
+        countdown_started = true;
+      }
+      // Se il countdown è iniziato
+      if (countdown_started) {
+        // Calcola il tempo rimanente
+        unsigned long remaining_time = end_time > millis() ? (end_time - millis()) / 1000 : 0;
+        // Se il tempo rimanente è zero, reimposta lo stato
+        if (remaining_time == 0) {
+          countdown_started = false;
+        }
+        // Se il valore di power scende sotto 4000, reimposta il countdown
+        if (id(power).state < 4000) {
+          countdown_started = false;
+        }
+        return remaining_time;
+      } else {
+        // Se il countdown non è iniziato, restituisci 0
+        return 0;
+      }
+
+
+
+
+
+  - platform: template
+    name: "Totale Bolletta Attuale"
+    unit_of_measurement: 'EURO'
+    accuracy_decimals: 2
+    internal: True
+    lambda: |-
+          // Calcolo del totale della bolletta attuale includendo oneri di accise, trasporto, IVA e condizioni fornite
+          float energia_fattura = id(costo_energia_f1).state + id(costo_energia_f2).state + id(costo_energia_f3).state + id(costo_energia_totale).state;
+          
+          // Perdita di rete del 10% del costo energia
+          energia_fattura *= 1.1; // Aumenta il costo energia del 10% per la perdita di rete
+          
+          // Fee del 0.01 del costo energia
+          float fee = 0.01 * energia_fattura;
+          
+          // 120€ da dividere su 12 mensilità
+          float mensilita = 120.0 / 12.0;
+          
+          // Sconto Fedeltà Luce
+          float sconto = 0.5;
+          int mesi_di_fornitura = /* Calcola il numero di mesi di fornitura */ 0; // Assicurati di calcolare correttamente il numero di mesi di fornitura
+          if (mesi_di_fornitura <= 12) {
+            sconto = 0.05 * energia_fattura; // Sconto del 5% per i primi 12 mesi
+          } else if (mesi_di_fornitura > 12 && mesi_di_fornitura <= 24) {
+            sconto = 0.10 * energia_fattura; // Sconto del 10% dal 13° al 24° mese
+          } else if (mesi_di_fornitura > 24 && mesi_di_fornitura <= 36) {
+            sconto = 0.15 * energia_fattura; // Sconto del 15% dal 25° al 36° mese
+          } else {
+            sconto = 0.20 * energia_fattura; // Sconto del 20% dal 37° mese in avanti
+          }
+          
+          // Dispacciamento circa il 7% del costo totale della bolletta
+          float accise = 0.05 * energia_fattura;  // 5% di accise
+          float trasporto = 0.10 * energia_fattura;  // 10% di trasporto
+          float dispacciamento = 0.07 * (energia_fattura + accise + trasporto + fee - sconto + mensilita);
+          
+          // Aggiunta di oneri di accise, trasporto e IVA
+          float iva = 0.22 * (energia_fattura + accise + trasporto + fee - sconto + mensilita + dispacciamento);  // IVA al 22% su totale energia + accise + trasporto + fee - sconto + mensilita + dispacciamento
+          
+          // Restituzione del totale della bolletta attuale
+          return energia_fattura + accise + trasporto + fee - sconto + mensilita + dispacciamento + iva;
+          
+  - platform: total_daily_energy
+    name: "Costo Energia Mensile"
+    id: costo_energia_mensile
+    unit_of_measurement: 'EURO'
+    power_id: costo_energia_totale
+    filters:
+      - multiply: 1  # Non applicare alcun filtro al valore giornaliero
+    accuracy_decimals: 2
+    restore: True
+
+
+
+
+text_sensor:
+  - platform: template
+    #name: "Screen Index"
+    id: screen_index
+    internal: true
+  - platform: template
+    #name: "Fascia Attuale"
+    id: current_fascia
+    internal: true
+  - platform: template
+    #name: "Fascia Attuale"
+    id: current_fascia_text
+    internal: false
+  - platform: template
+    #name: "Fascia Attuale €"
+    id: current_fascia_prezzo
+    internal: false
+
+  - platform: homeassistant
+  #  name: "pir"
+    entity_id: binary_sensor.pir_soggiorno
+    id: pir_soggiorno
+    internal: True
+  - platform: homeassistant
+  #  name: "Allarme stato"
+    entity_id: alarm_control_panel.alarmo
+    id: allarme_stato
+    internal: True
+  - platform: homeassistant
+    #name: "Allarme sensori aperti"
+    entity_id: alarm_control_panel.alarmo
+    id: allarme_sensori_aperti
+    attribute: "open_sensors"
+    internal: True
+  - platform: homeassistant
+    #name: "Allarme sensori esclusi"
+    entity_id: alarm_control_panel.alarmo
+    id: allarme_sensori_esclusi
+    attribute: "bypassed_sensors"
+    internal: True
+    
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+
+servo:
+  - id: rearm_servo
+    output: servo_pin
+    min_level: 0.0
+    max_level: 1.0
+    idle_level: 0.075
+    restore: False    
+globals:
+  - id: rearm_attempts
+    type: int
+    initial_value: "0"
+    
+  - id: last_rearm_time
+    type: float
+    initial_value: "0.0"
+
+  - id: rearm_time_remaining
+    type: int
+    restore_value: true
+    initial_value: "0"
+  - id: rearm_timer_started
+    type: bool
+    restore_value: true
+    initial_value: "false"
+
+  - id: rearm_blocked
+    type: bool
+    initial_value: "false"
+
+  - id: rearm_attempts_limit
+    type: int
+    restore_value: true
+    initial_value: "5"
+interval:
+  - interval: 30s
+    then: 
+      - lambda: |-
+          auto time = id(homeassistant_time).now();
+          int day_of_week = time.day_of_week;
+          int day = time.day_of_month;
+          int month = time.month;
+          int hour = time.hour;
+          bool is_weekday = (day_of_week >= 1 && day_of_week <= 5);
+          bool is_saturday = (day_of_week == 6);
+          bool is_sunday = (day_of_week == 0);
+
+          // Funzione per calcolare la Pasqua e Pasquetta
+          auto calculate_easter_dates = [](int year) {
+            int a = year % 19;
+            int b = year / 100;
+            int c = year % 100;
+            int d = b / 4;
+            int e = b % 4;
+            int f = (b + 8) / 25;
+            int g = (b - f + 1) / 3;
+            int h = (19 * a + b - d - g + 15) % 30;
+            int i = c / 4;
+            int k = c % 4;
+            int l = (32 + 2 * e + 2 * i - h - k) % 7;
+            int m = (a + 11 * h + 22 * l) / 451;
+            int month = (h + l - 7 * m + 114) / 31;
+            int day = ((h + l - 7 * m + 114) % 31) + 1;
+            int easter_day = day;
+            int easter_month = month;
+            int easter_monday_day = day + 1;
+            int easter_monday_month = month;
+
+            // Check if Easter Monday goes to the next month
+            if (easter_monday_day > 31 && easter_month == 3) {
+              easter_monday_day = 1;
+              easter_monday_month = 4;
+            } else if (easter_monday_day > 30 && easter_month == 4) {
+              easter_monday_day = 1;
+              easter_monday_month = 5;
+            }
+            return std::make_pair(std::make_pair(easter_day, easter_month), std::make_pair(easter_monday_day, easter_monday_month));
+          };
+
+          // Funzione per determinare se è una festività nazionale
+          auto is_holiday = [=]() -> bool {
+            // Lista delle festività
+            std::vector<std::pair<int, int>> holidays = {
+              {1, 1}, // Capodanno
+              {6, 1}, // Epifania
+              {25, 4}, // Liberazione dal nazifascismo
+              {1, 5}, // Festa del lavoro
+              {2, 6}, // Festa della Repubblica
+              {15, 8}, // Assunzione di Maria
+              {1, 11}, // Ognissanti
+              {8, 12}, // Immacolata Concezione
+              {25, 12}, // Natale
+              {26, 12} // Santo Stefano
+            };
+
+            // Verifica se oggi è una delle festività
+            for (const auto& holiday : holidays) {
+              if (day == holiday.first && month == holiday.second) {
+                return true;
+              }
+            }
+
+            // Verifica se oggi è Pasqua o Pasquetta
+            auto easter_dates = calculate_easter_dates(time.year);
+            auto easter_date = easter_dates.first;
+            auto easter_monday_date = easter_dates.second;
+            if ((day == easter_date.first && month == easter_date.second) ||
+                (day == easter_monday_date.first && month == easter_monday_date.second)) {
+              return true;
+            }
+
+            return false;
+          };
+
+          float f1_prezzo = id(prezzo_f1).state;
+          float f2_prezzo = id(prezzo_f2).state;
+          float f3_prezzo = id(prezzo_f3).state;
+          float power1 = id(power).state;
+
+          if (!isnan(power1)) {
+            if (is_weekday && !is_holiday() && (hour >= 8 && hour < 19)) {
+                id(energy_f1).publish_state(power1);
+            } else if ((is_weekday && !is_holiday() && (hour >= 7 && hour < 8)) || (is_weekday && !is_holiday() && (hour >= 19 && hour < 23)) || (is_saturday && (hour >= 7 && hour < 23))) {
+                id(energy_f2).publish_state(power1);
+            } else {
+                id(energy_f3).publish_state(power1);
+            }
+          }
+
+          // Determina la fascia attuale e aggiorna il sensore
+          if (is_weekday && !is_holiday() && (hour >= 8 && hour < 19)) {
+              id(current_fascia).publish_state(std::string("F1 ") + std::to_string(f1_prezzo)); // Fascia F1
+          } else if ((is_weekday && !is_holiday() && (hour >= 7 && hour < 8)) || (is_weekday && !is_holiday() && (hour >= 19 && hour < 23)) ||
+                     (is_saturday && (hour >= 7 && hour < 23))) {
+              id(current_fascia).publish_state(std::string("F2 ") + std::to_string(f2_prezzo)); // Fascia F2
+          } else {
+              id(current_fascia).publish_state(std::string("F3 ") + std::to_string(f3_prezzo)); // Fascia F3
+          }
+
+          // Determina la fascia attuale e aggiorna il sensore text
+          if (is_weekday && !is_holiday() && (hour >= 8 && hour < 19)) {
+              id(current_fascia_text).publish_state("F1"); // Fascia F1
+          } else if ((is_weekday && !is_holiday() && (hour >= 7 && hour < 8)) || (is_weekday && !is_holiday() && (hour >= 19 && hour < 23)) ||
+                     (is_saturday && (hour >= 7 && hour < 23))) {
+              id(current_fascia_text).publish_state("F2"); // Fascia F2
+          } else {
+              id(current_fascia_text).publish_state("F3"); // Fascia F3
+          }
+
+          // Determina la fascia attuale e aggiorna il sensore text per il prezzo
+          if (is_weekday && !is_holiday() && (hour >= 8 && hour < 19)) {
+              id(current_fascia_prezzo).publish_state(std::to_string(f1_prezzo)); // Fascia F1
+          } else if ((is_weekday && !is_holiday() && (hour >= 7 && hour < 8)) || (is_weekday && !is_holiday() && (hour >= 19 && hour < 23)) ||
+                     (is_saturday && (hour >= 7 && hour < 23))) {
+              id(current_fascia_prezzo).publish_state(std::to_string(f2_prezzo)); // Fascia F2
+          } else {
+              id(current_fascia_prezzo).publish_state(std::to_string(f3_prezzo)); // Fascia F3
+          }
+
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: |-
+                  return !id(rearm_blocked);
+              - or:
+                  - sensor.in_range:
+                      id: vol
+                      below: 100.0
+                      above: 0.0
+          then:
+            - if:
+                condition:
+                  lambda: |-
+                    if (id(vol).state > 200.0) {
+                      if (id(rearm_attempts) == 0) {
+                        id(rearm_servo).write(90.0);
+                        delay(3000);
+                        id(rearm_servo).write(0.0);
+                        id(rearm_attempts) += 1;
+                        id(last_rearm_time) = millis();
+                        return true;
+                      } else if (id(rearm_attempts) == 1 && (millis() - id(last_rearm_time)) < 10000) {
+                        id(rearm_servo).write(90.0);
+                        delay(20000);
+                        id(rearm_servo).write(0.0);
+                        id(rearm_attempts) += 1;
+                        id(last_rearm_time) = millis();
+                        return true;
+                      } else if (id(rearm_attempts) == 2 && (millis() - id(last_rearm_time)) < 20000) {
+                        id(rearm_servo).write(90.0);
+                        delay(180000);
+                        id(rearm_servo).write(0.0);
+                        id(rearm_attempts) += 1;
+                        id(last_rearm_time) = millis();
+                        return true;
+                      } else if (id(rearm_attempts) == 3 && (millis() - id(last_rearm_time)) < 60000) {
+                        id(rearm_blocked) = true;
+                        return false;
+                      }
+                    } else {
+                      id(rearm_attempts) = 0;
+                      id(rearm_blocked) = false;
+                    }
+                    return false;
+                then:
+                  - logger.log: "Condizione soddisfatta, servo azionato."
+                else:
+                  - logger.log: "Condizione non soddisfatta."
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(power).state > 3300 && id(power).state <= 4000;'
+          then:
+            - light.toggle: display_light
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(power).state <= 3300;'
+                then:
+                  - light.turn_on: display_light
+                 # - rtttl.play: 'siren:d=8,o=5,b=100:d,e,d,e,d,e,d,e'      
+  - interval: 10s
+    then:
+      - lambda: |-
+          id(display_toggle).publish_state(!id(display_toggle).state);
+      - lambda: |-
+          float power1 = id(power).state;
+          if (power1 <= 3000) {
+            int screen_index_state = atoi(id(screen_index).state.c_str());
+            screen_index_state = (screen_index_state + 1) % 8;
+            id(screen_index).publish_state(std::to_string(screen_index_state));
+          }
+
+  - interval: 0.5s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(power).state > 0 && id(power).state <= 3299;'
+          then:
+            - light.turn_on: display_light
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(power).state == 0;'
+                then:
+                  - light.toggle: display_light
+                  - delay: 500ms
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return id(power).state > 3299 && id(power).state <= 4000;'
+                      then:
+                        - light.toggle: display_light
+                        - rtttl.play: 'Whistle:d=8,o=6,b=140:g'
+                      else:
+                        - if:
+                            condition:
+                              lambda: 'return id(power).state > 4000;'
+                            then:
+                              - light.turn_on: display_light
+                              - rtttl.play: 'Whistle:d=8,o=6,b=140:e'
+                            else:
+                              - light.turn_off: display_light
+  - interval: 0.5s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(vol).state > 195 && id(vol).state <= 245;'
+          then:
+            - light.turn_on: display_light
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(vol).state <= 195;'
+                then:
+                  - light.toggle: display_light
+                  - rtttl.play: 'Whistle:d=8,o=6,b=140:e'
+                else:
+                  - if:
+                      condition:
+                        lambda: 'return id(vol).state > 245;'
+                      then:
+                        - light.turn_on: display_light
+                        - rtttl.play: 'Whistle:d=8,o=6,b=140:g'
+                      else:
+                        - light.turn_off: display_light
+      - delay: 1000ms #500ms
+
+
