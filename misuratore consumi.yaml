@@ -3,7 +3,7 @@ substitutions:
   board: d1_mini
   platform: ESP8266
   esp8266_store_log_strings_in_flash: 'true'
-
+#pzem004-t + display 20x4 i2c + d1_mini + buzzer
 esphome:
   name: $device_name
   platform: $platform
