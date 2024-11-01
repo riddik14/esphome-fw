@@ -1,0 +1,103 @@
+substitutions:
+  device_name: termostato
+  #board: d1_mini
+  board: esp01_1m
+  platform: ESP8266
+  #logger_level: DEBUG
+  esp8266_store_log_strings_in_flash: 'false'
+  
+esphome:
+  name: $device_name
+  platform: $platform
+  board: $board
+  board_flash_mode: dout
+
+<<: !include base.txt
+#gpio0.   rele
+#gpio1.   serial 
+#gpio2.   pulsante on/off      
+#gpio3.   serial
+logger:
+  level: DEBUG
+binary_sensor:
+  - platform: gpio
+    internal: true
+    pin:
+      number: GPIO2
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "pulsante rele 1"
+    on_click:
+    - min_length: 50ms
+      max_length: 350ms
+      then:
+        - switch.toggle: relay1
+    on_double_click:
+      min_length: 50ms
+      max_length: 350ms
+      then:
+        - homeassistant.service:
+            service: scene.turn_on
+            data:
+              entity_id: scene.film
+climate:
+  - platform: thermostat
+    name: "Riscaldamento_test"
+    id: termostato
+    sensor: temperatura_media_interna
+    on_boot_restore_from: memory
+    default_preset: eco
+    preset:
+      -  name: comfort
+         default_target_temperature_low: 22 °C
+      -  name: eco
+         default_target_temperature_low: 15 °C
+      -  name: ideale
+         default_target_temperature_low: 18 °C
+         #default_target_temperature_max: 21 °C
+      -  name: away
+         default_target_temperature_low: 10 °C
+    min_heating_off_time: 10s
+    min_heating_run_time: 10s
+    min_idle_time: 10s
+    heat_action:
+      - switch.turn_on: 
+           id: relay1
+    idle_action:
+      - switch.turn_off: 
+           id: relay1
+switch:
+  - platform: gpio
+    name: $device_name
+    pin: GPIO0
+    id: relay1
+    internal: true
+    inverted: True
+
+  - platform: restart
+    name: "riavvia $device_name"
+
+#status_led:
+#  pin:
+#    number: GPIO1
+#    inverted: yes
+i2c:
+  sda: GPIO1
+  scl: GPIO3
+sensor:
+  - platform: sht3xd
+    temperature:
+      name: "Temperatura"
+      id: temp
+      filters:
+        - lambda: return x * 1 - 4.0;
+    humidity:
+      name: "Umidità"
+      id: hum
+    address: 0x45
+    update_interval: 600s
+    heater_enabled: True
+  - platform: homeassistant
+    name: "Temperatura media interna"
+    id: temperatura_media_interna
+    entity_id: sensor.lumi_lumi_weather_temperature_2
